@@ -1,0 +1,7 @@
+{"status":"success","message":null,"data":[
+{"id":"17914401175772326","namad":"اهرم","assetType":2,"subType":3,"market":1,"isOpen":true,"hv":0.47},
+{"id":"35425587644337450","namad":"فملی","assetType":1,"subType":null,"market":1,"isOpen":true,"hv":0.32},
+{"id":"778253364357513","namad":"وبملت","assetType":1,"subType":null,"market":1,"isOpen":true,"hv":0.33},
+{"id":"67455383896188985","namad":"جوانه کوچک","assetType":2,"subType":2,"market":1,"isOpen":true,"tseOptionAliases":["جوانه.ک"],"hv":0.3},
+{"id":"8175784894140974","namad":"فزر","assetType":1,"subType":null,"market":2,"isOpen":true,"hv":0.37},
+{"id":"51920757918600374","namad":"هم تراز","assetType":2,"subType":2,"market":1,"isOpen":true,"hv":0.3}]}
