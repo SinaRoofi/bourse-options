@@ -1,0 +1,57 @@
+name: Option Scanner
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "normal = اجرای عادی | ping = فقط پیام تست به کانال | force = اسکن بدون چک ساعت بازار (پیام واقعی می‌فرسته)"
+        type: choice
+        options: [normal, ping, force]
+        default: normal
+  repository_dispatch:
+    types: [run-options]
+  schedule:
+    # شنبه تا چهارشنبه، هر ۵ دقیقه، ≈ ۰۸:۵۰ تا ۱۲:۳۵ تهران (۰۵:۲۰ تا ۰۹:۰۵ UTC).
+    # ساعت دقیق بازار و تعطیلی رو خود اسکریپت (ساعت + تازگی دیتا) فیلتر می‌کنه.
+    - cron: "*/5 5-8 * * 0-3,6"
+    - cron: "0,5 9 * * 0-3,6"
+
+concurrency:
+  group: option-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GIST_ID: ${{ secrets.GIST_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install --disable-pip-version-check -q -r requirements.txt
+
+      # بدون Gist، حافظه‌ی ضدتکرار از طریق cache بین اجراها منتقل می‌شه
+      - name: Restore alert state (when no Gist)
+        if: ${{ env.GIST_ID == '' }}
+        uses: actions/cache@v4
+        with:
+          path: option_alerts_state.json
+          key: opt-state-${{ github.run_id }}
+          restore-keys: opt-state-
+
+      - name: Scan protective puts
+        run: python option_main.py ${{ github.event.inputs.mode == 'ping' && '--ping' || github.event.inputs.mode == 'force' && '--force' || '' }}
+        env:
+          OPTIONS_API_URL: ${{ secrets.OPTIONS_API_URL }}          # اختیاری؛ پیش‌فرض داخل کد
+          OPTIONS_API_HEADERS: ${{ secrets.OPTIONS_API_HEADERS }}  # اختیاری
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPTIONS_CHAT_ID: ${{ secrets.OPTIONS_CHAT_ID }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
