@@ -92,7 +92,8 @@ def format_opportunity(o: Opportunity) -> str:
     fe = c["fees"]
     lines.append(f"کارمزد: خرید {kind} {pct(fe['buy'] * 100, 3)} | آپشن {pct(fe['option'] * 100, 2)} | اعمال {pct(fe['exercise'] * 100, 2)} | فروش بازاری {pct(fe['sell'] * 100, 3)}")
     lines.append(f"بدترین حالت: {n(o.worst_per_share)} ({pct(o.margin_pct, 2, True)}) | سالانه‌شده: {fa(f'{o.annual_pct:.0f}')}٪")
-    lines.append(f"هزینه‌ی فرصت پول با نرخ {fa(f'{c['rate'] * 100:.0f}')}٪: {pct(o.carry_pct, 1)} → خالص: <b>{pct(o.net_after_carry_pct, 2, True)}</b>")
+    rate_txt = fa(f"{c['rate'] * 100:.0f}")
+    lines.append(f"هزینه‌ی فرصت پول با نرخ {rate_txt}٪: {pct(o.carry_pct, 1)} → خالص: <b>{pct(o.net_after_carry_pct, 2, True)}</b>")
     if c["breakeven"]:
         lines.append(f"سربه‌سر وقتی {kind} در سررسید برسه به {n(c['breakeven'])} ({pct(c['breakeven_chg_pct'], 1, True)} از الان)")
     S.append((0, "\n".join(lines)))
@@ -126,9 +127,11 @@ def format_opportunity(o: Opportunity) -> str:
         put.append("➜ " + ("پوت از هر دو مرجع ارزون‌تره (قیمت مناسب خرید)" if max(rich) < 0 else
                             "پوت از هر دو مرجع گرون‌تره" if min(rich) > 0 else "قیمت پوت بین wiv و HVه (منصفانه)"))
     if c.get("iv") and (c.get("wiv") or c.get("hv")):
-        put.append(f"دلتا: {fa(f'{c['delta']:.2f}')} | تتا روزانه: {n(c['theta_day'])} ریال")
+        delta_txt = fa(f"{c['delta']:.2f}")
+        put.append(f"دلتا: {delta_txt} | تتا روزانه: {n(c['theta_day'])} ریال")
     elif c.get("iv"):
-        put.append(f"نوسان ضمنی: {pct(c['iv'] * 100, 0)} | دلتا: {fa(f'{c['delta']:.2f}')} | تتا روزانه: {n(c['theta_day'])} ریال")
+        delta_txt = fa(f"{c['delta']:.2f}")
+        put.append(f"نوسان ضمنی: {pct(c['iv'] * 100, 0)} | دلتا: {delta_txt} | تتا روزانه: {n(c['theta_day'])} ریال")
     S.append((1, "\n".join(put)))
 
     chg = (s["final"] / s["yesterday"] - 1) * 100 if s["yesterday"] else 0
