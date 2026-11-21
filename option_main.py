@@ -1,20 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-اجرای اسکنر پروتکتیو پوت و ارسال هشدار به کانال آپشن.
 
-env:
-  OPTIONS_API_URL      اختیاری؛ پیش‌فرض: option-snapshot/full ‏optionbaaz
-  OPTIONS_API_TOKEN    توکن ورود (Authorization: Bearer ...)  — اگه endpoint نیاز به لاگین داره
-  OPTIONS_API_COOKIE   یا Cookie مرورگر (به‌جای توکن)
-  OPTIONS_API_HEADERS  اختیاری: JSON هدرهای اضافه، مثلاً {"x-api-key": "..."}
-  TELEGRAM_BOT_TOKEN   توکن ربات (همونی که ریپو داره)
-  OPTIONS_CHAT_ID      کانال مخصوص آپشن
-  GIST_ID / GIST_TOKEN اختیاری: برای حافظه‌ی ضدتکرار هشدارها
-  OPTIONS_IV_URL / OPTIONS_HV_URL  اختیاری: آدرس iv-stats و underlying-symbols (پیش‌فرض optionbaaz)
-  تنظیمات آستانه/نرخ/کارمزد: فایل config.json (OPT_* فقط برای override اضطراری)
-
-اجرا:  python option_main.py [--file full.json] [--asof 2026-11-18] [--dry-run] [--force]
-"""
 import argparse, json, os, sys, time
 from dataclasses import fields
 from datetime import datetime, date, timedelta, timezone
