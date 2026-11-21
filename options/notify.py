@@ -38,7 +38,7 @@ def _notes(o: Opportunity) -> list:
         out.append("سررسید خیلی نزدیکه؛ مهلت و ساعت ثبت درخواست اعمال رو از کارگزاری چک کن.")
     if p["volume"] == 0:
         out.append("پوت امروز معامله نشده؛ ممکنه bid/ask قدیمی باشه.")
-    if p["ask_vol"] < 5:
+    if p["ask_vol_known"] and p["ask_vol"] < 5:
         out.append(f"حجم عرضه‌ی پوت در بهترین قیمت فقط {fa(int(p['ask_vol']))} قرارداده؛ ممکنه کامل پر نشه.")
     if p["spread_pct"] is not None and p["spread_pct"] > 3:
         out.append(f"اسپرد پوت {pct(p['spread_pct'], 1)} هست؛ خروج زودتر از سررسید گرون تموم می‌شه، برای نگه‌داشتن تا اعمال مناسبه.")
@@ -108,9 +108,11 @@ def format_opportunity(o: Opportunity) -> str:
 
     put = [f"<b>🧮 پوت {html.escape(o.put_symbol)}</b>",
            f"bid/ask: {n(p['bid'])} / {n(p['ask'])}" + (f" (اسپرد {pct(p['spread_pct'], 1)})" if p["spread_pct"] is not None else ""),
-           f"حجم عرضه (ask): {n(p['ask_vol'])} قرارداد | حجم تقاضا (bid): {n(p['bid_vol'])}",
+           (f"حجم عرضه (ask): {n(p['ask_vol'])} قرارداد | حجم تقاضا (bid): {n(p['bid_vol'])}" if p["ask_vol_known"]
+            else "حجم صف bid/ask پوت تو این منبع نیست؛ قبل از خرید صف رو تو کارگزاری چک کن."),
            f"آخرین/پایانی: {n(p['last'])} / {n(p['final'])} | دیروز: {n(p['yesterday'])}",
-           f"معامله‌ی امروز: {n(p['volume'])} قرارداد، {toman_m(p['turnover'])} میلیون تومان، {n(p['trades'])} نوبت"]
+           (f"موقعیت باز: {n(p['open_interest'])} قرارداد" if p.get("open_interest") else None),
+           f"معامله‌ی امروز: {n(p['volume'])} قرارداد، {toman_m(p['turnover'])} میلیون تومان" + (f"، {n(p['trades'])} نوبت" if p["trades"] else "")]
     if c.get("wiv") or c.get("hv"):
         parts = [f"ضمنی پوت: {pct(c['iv'] * 100, 0)}" if c.get("iv") else None,
                  f"wiv پایه: {pct(c['wiv'] * 100, 0)}" if c.get("wiv") else None,
@@ -126,31 +128,45 @@ def format_opportunity(o: Opportunity) -> str:
     if len(rich) == 2:
         put.append("➜ " + ("پوت از هر دو مرجع ارزون‌تره (قیمت مناسب خرید)" if max(rich) < 0 else
                             "پوت از هر دو مرجع گرون‌تره" if min(rich) > 0 else "قیمت پوت بین wiv و HVه (منصفانه)"))
+    h = c.get("heston")
+    if h:
+        put.append(f"هستون (کالیبره روی {fa(h['n_points'])} قرارداد، خطای برازش {pct(h['rmse_rel'] * 100, 0)}): تئوریک {n(h['price'])} → پوت "
+                   + f"{pct(abs(h['rich_pct']), 1)} " + ("گرون‌تر ❌" if h["rich_pct"] > 0 else "ارزون‌تر ✅"))
     if c.get("iv") and (c.get("wiv") or c.get("hv")):
         delta_txt = fa(f"{c['delta']:.2f}")
         put.append(f"دلتا: {delta_txt} | تتا روزانه: {n(c['theta_day'])} ریال")
     elif c.get("iv"):
         delta_txt = fa(f"{c['delta']:.2f}")
         put.append(f"نوسان ضمنی: {pct(c['iv'] * 100, 0)} | دلتا: {delta_txt} | تتا روزانه: {n(c['theta_day'])} ریال")
-    S.append((1, "\n".join(put)))
+    S.append((1, "\n".join(x for x in put if x)))
 
     chg = (s["final"] / s["yesterday"] - 1) * 100 if s["yesterday"] else 0
     vr = s["volume"] / s["avg_month_vol"] if s["avg_month_vol"] else 0
+    vol_txt = f"حجم: {n(s['volume'])}" + (f" ({fa(f'{vr:.1f}')}× میانگین ماهانه)" if s["avg_month_vol"] else "")
     stock = [f"<b>📈 {kind} {html.escape(o.underlying)}</b>",
              f"bid/ask: {n(s['bid'])} / {n(s['ask'])} | حجم عرضه (ask): {n(s['ask_vol'])}",
              f"پایانی: {n(s['final'])} ({pct(chg, 1, True)}) | آخرین: {n(s['last'])} | محدوده امروز: {n(s['low'])} تا {n(s['high'])}",
-             f"حجم: {n(s['volume'])} ({fa(f'{vr:.1f}')}× میانگین ماهانه) | ارزش: {toman_b(s['turnover'])} میلیارد تومان"]
+             f"{vol_txt} | ارزش: {toman_b(s['turnover'])} میلیارد تومان"]
     if s.get("nav"):
         stock.append(f"NAV{(' (' + fa(s['nav_date'][:10]) + ')') if s['nav_date'] else ''}: {n(s['nav'])} | قیمت خرید نسبت به NAV: {pct((s['ask'] / s['nav'] - 1) * 100, 2, True)}"
                      + (" (زیر NAV ✅)" if s["ask"] < s["nav"] else " (بالای NAV)"))
     S.append((1, "\n".join(stock)))
 
-    S.append((2, "<b>💵 جریان پول</b>\n" +
-              f"حقیقی خالص: {toman_b(s['real_net_value'])} میلیارد تومان ({'ورود' if s['real_net_value'] >= 0 else 'خروج'}) | "
-              f"خریدار/فروشنده حقیقی: {n(s['real_buy_cnt'])} / {n(s['real_sell_cnt'])}"))
+    if s.get("has_flow"):
+        flow = f"حقیقی خالص: {toman_b(s['real_net_value'])} میلیارد تومان ({'ورود' if s['real_net_value'] >= 0 else 'خروج'})"
+        if s["real_buy_cnt"] or s["real_sell_cnt"]:
+            flow += f" | خریدار/فروشنده حقیقی: {n(s['real_buy_cnt'])} / {n(s['real_sell_cnt'])}"
+        extra = []
+        if s.get("buy_power") is not None:
+            bp_txt = fa(f"{s['buy_power']:.2f}")
+            extra.append(f"قدرت خرید حقیقی: {bp_txt}")
+        if s.get("per_capita_buy") and s.get("per_capita_sell"):
+            extra.append(f"سرانه خرید/فروش: {toman_m(s['per_capita_buy'])} / {toman_m(s['per_capita_sell'])} میلیون تومان")
+        S.append((2, "<b>💵 جریان پول</b>\n" + flow + ("\n" + " | ".join(extra) if extra else "")))
 
     cap = (f"<b>📦 ظرفیت اجرا (بهترین قیمت ask)</b>\n{fa(o.contracts)} قرارداد = {n(o.contracts * 1000)} سهم ≈ "
-           f"{toman_m(o.position_value)} میلیون تومان | محدودکننده: حجم عرضه‌ی {'پوت' if c['limit_by'] == 'put' else kind}")
+           f"{toman_m(o.position_value)} میلیون تومان | محدودکننده: حجم عرضه‌ی {'پوت' if c['limit_by'] == 'put' else kind}"
+           + ("" if p["ask_vol_known"] else " (حجم عرضه‌ی پوت نامعلومه؛ ظرفیت فقط از سمت " + kind + ")"))
     S.append((0, cap))
     S.append((1, "<b>⚠️ نکات</b>\n" + "\n".join("• " + t for t in _notes(o))))
 
