@@ -41,7 +41,8 @@ def build_stats(iv_payload: Optional[dict], hv_payload: Optional[dict]) -> Dict[
         key = norm(row.get("namad", ""))
         by_name.setdefault(key, {}).update(
             hv=row.get("hv"), leveraged=(row.get("assetType") == 2 and row.get("subType") == 3),
-            asset=row.get("assetType"))
+            asset=row.get("assetType"), asset_type=row.get("assetType"), sub_type=row.get("subType"),
+            industry=row.get("industryGroup"), ins_code=row.get("id"), namad=row.get("namad"))
         for a in row.get("tseOptionAliases") or []:
             aliases[norm(a)] = key
     return {"by_name": by_name, "aliases": aliases}
@@ -50,7 +51,10 @@ def build_stats(iv_payload: Optional[dict], hv_payload: Optional[dict]) -> Dict[
 def load_stats(iv_url: str = IV_URL, hv_url: str = HV_URL, headers: Optional[dict] = None,
                iv_file: str = "", hv_file: str = "") -> Dict[str, dict]:
     def read(path):
-        return json.load(open(path, encoding="utf-8")) if path else None
+        if not path:
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
     iv = read(iv_file) if iv_file else _get(iv_url, headers)
     hv = read(hv_file) if hv_file else _get(hv_url, headers)
     return build_stats(iv, hv)
