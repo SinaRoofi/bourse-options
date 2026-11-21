@@ -243,6 +243,8 @@ def _queue_info(item: dict) -> dict:
         "day_min": _num(item.get("dailyPriceLow")), "day_max": _num(item.get("dailyPriceHigh")),
         "volume": _num(item.get("volume")), "turnover": _num(item.get("turnover")),
         "trades": int(_num(item.get("tradeCount"))),
+        "ask_vol_known": q.get("sellVolume") is not None, "bid_vol_known": q.get("buyVolume") is not None,
+        "open_interest": _num(item.get("openInterest")),
     }
 
 
@@ -250,8 +252,15 @@ def _stock_flow(item: dict) -> dict:
     ts = item.get("traderStatistics") or {}
     def side(who, k, f):
         return _num(((ts.get(who) or {}).get(k) or {}).get(f))
+    has_flow = bool(ts) or item.get("_real_net_value") is not None
+    real_net = side("real", "buy", "value") - side("real", "sell", "value")
+    if item.get("_real_net_value") is not None:
+        real_net = _num(item["_real_net_value"])
     return {
-        "real_net_value": side("real", "buy", "value") - side("real", "sell", "value"),
+        "has_flow": has_flow,
+        "per_capita_buy": item.get("_per_capita_buy"), "per_capita_sell": item.get("_per_capita_sell"),
+        "buy_power": item.get("_buy_power"),
+        "real_net_value": real_net,
         "real_net_vol": side("real", "buy", "volume") - side("real", "sell", "volume"),
         "legal_net_value": side("legal", "buy", "value") - side("legal", "sell", "value"),
         "real_buy_cnt": int(side("real", "buy", "count")), "real_sell_cnt": int(side("real", "sell", "count")),
@@ -295,9 +304,11 @@ def _build_ctx(base: dict, it: dict, S: float, K: float, T: float, cost: float, 
 
 
 def put_ask_vol_lt_stock(it: dict, base: dict) -> bool:
-    pv = _num((_level1(it) or {}).get("sellVolume"))
+    raw = (_level1(it) or {}).get("sellVolume")
+    if raw is None:      # حجم عرضه‌ی پوت نامعلوم → محدودکننده فقط سمت سهم حساب می‌شه
+        return False
     sv = _num((_level1(base) or {}).get("sellVolume")) // CONTRACT_SIZE
-    return pv <= sv
+    return _num(raw) <= sv
 
 # ───────────────────────── هستهٔ اسکن ─────────────────────────
 def scan(data: Iterable[dict], today: date, cfg: ScanConfig = ScanConfig(),
@@ -326,12 +337,16 @@ def scan(data: Iterable[dict], today: date, cfg: ScanConfig = ScanConfig(),
         p1, s1 = _level1(it), _level1(base)
         if not p1 or not s1:
             continue
-        put_ask, put_ask_vol = _num(p1.get("sell")), _num(p1.get("sellVolume"))
+        put_ask = _num(p1.get("sell"))
+        put_vol_known = p1.get("sellVolume") is not None   # بعضی منابع حجم صف bid/ask نمی‌دن
+        put_ask_vol = _num(p1.get("sellVolume"))
         stock_ask, stock_ask_vol = _num(s1.get("sell")), _num(s1.get("sellVolume"))
-        if put_ask < cfg.min_option_price or put_ask_vol <= 0 or stock_ask <= 0 or stock_ask_vol <= 0:
+        size = int(_num(it.get("contractSize")) or CONTRACT_SIZE)
+        if put_ask < cfg.min_option_price or stock_ask <= 0 or stock_ask_vol <= 0 or (put_vol_known and put_ask_vol <= 0):
             continue
 
-        contracts = int(min(put_ask_vol, stock_ask_vol // CONTRACT_SIZE))
+        stock_contracts = stock_ask_vol // size
+        contracts = int(min(put_ask_vol, stock_contracts)) if put_vol_known else int(stock_contracts)
         if contracts < cfg.min_contracts:
             continue
 
@@ -341,7 +356,7 @@ def scan(data: Iterable[dict], today: date, cfg: ScanConfig = ScanConfig(),
         proceeds = po.strike * (1 - fees["exercise"])
         worst = proceeds - cost
         margin = worst / cost * 100
-        position_value = contracts * CONTRACT_SIZE * cost
+        position_value = contracts * size * cost
         if position_value < cfg.min_position_value:
             continue
 
