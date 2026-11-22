@@ -1,16 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-اسکنر پروتکتیو پوت: دیتا از tradersarena (option-watch-csv + info؛ جایگزین: snapshot)، محاسبه‌ی بلک-شولز/هستون با نرخ خودمون،
-و هشدار به کانال تلگرام. تنظیمات: config.py
 
-env (Secrets تو GitHub):
-  TELEGRAM_BOT_TOKEN, OPTIONS_CHAT_ID   الزامی
-  GIST_ID / GIST_TOKEN                  اختیاری: حافظه‌ی ضدتکرار روی Gist (وگرنه cache خود Actions)
-  TRADERSARENA_BASE_URL                 اختیاری؛ پیش‌فرض https://tradersarena.ir
-  OPTIONS_API_HEADERS                   اختیاری: JSON هدر اضافه، اگه روزی tradersarena ورود/کوکی خواست
-
-اجرا:  python option_main.py [--dry-run] [--force] [--ping] [--probe]
-"""
 import argparse
 import os
 import sys
