@@ -30,6 +30,23 @@ def market_is_open(now: datetime, start=(9, 0), end=(12, 30)) -> bool:
     return start <= (now.hour, now.minute) <= end
 
 
+def newest_update(data: list):
+    """تازه‌ترین زمان به‌روزرسانی داده (lastTransaction آیتم‌ها، aware)؛ None = زمان معتبری نبود."""
+    newest = None
+    for x in data:
+        ts = x.get("lastTransaction")
+        if not ts:
+            continue
+        try:
+            t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        newest = t if newest is None or t > newest else newest
+    return newest
+
+
 def snapshot_age_minutes(data: list, now: datetime):
     """سن تازه‌ترین زمان به‌روزرسانی (دقیقه) از lastTransaction آیتم‌ها. None = هیچ زمان معتبری نبود."""
     newest = None
@@ -150,6 +167,7 @@ def main() -> int:
             return 0
 
     opps = scan(data, today, cfg, stats)
+    data_dt = newest_update(data)
     print(f"🔎 {len(opps)} فرصت پیدا شد (آستانه: locked≥{cfg.min_locked_margin_pct}% / max_loss≤{cfg.max_loss_pct}%)")
 
     aliases_rev: dict = {}
@@ -169,6 +187,8 @@ def main() -> int:
             continue
         if settings.heston_enabled and chain:
             attach_heston(o, chain, cfg.rate, today, hcache, aliases_rev)
+        if data_dt:
+            o.ctx["data_time"] = data_dt.astimezone(TEHRAN)   # زمان داده تو کارت اول پیام (وقت تهران)
         text = format_opportunity(o)
         if a.dry_run or not (token and chat):
             print("─" * 40 + "\n" + text)
