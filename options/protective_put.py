@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, asdict, field
 from datetime import date, datetime
@@ -101,10 +102,15 @@ class ScanConfig:
 
     # سررسید
     min_days: int = 1
+    # حالت ضرر (worst<0): اگه کمتر از این‌قدر روز مونده باشه هشدار نمی‌ره (بیمه‌ی چندروزه معنی نداره؛ سالانه‌سازی هم اغراق‌آمیزه)
+    min_days_loss: int = 5
+    # حالت ضرر: سربه‌سر باید «قابل‌دسترس» باشه؛ فاصله‌ی سربه‌سر (ln(سربه‌سر/قیمت)) تقسیم بر نوسان تا سررسید
+    # (نوسان تاریخی؛ اگه نبود نوسان ضمنی وزنی) از این عدد بیشتر نباشه. 0 = خاموش. اگه نوسانی نداریم فیلتر اعمال نمی‌شه
+    max_breakeven_sigma: float = 1.5
     max_days: int = 400
 
-    # حداقل قیمت معنادار پوت/سهم (قیمت ۱ یعنی بدون معامله)
-    min_option_price: float = 2
+    # حداقل قیمت فروش پوت برای ورود به اسکن (ریال)؛ «بدون معامله» با ارزش معامله = ۰ تشخیص داده می‌شه
+    min_option_price: float = 1
 
 
 @dataclass
@@ -294,10 +300,18 @@ def _build_ctx(base: dict, it: dict, S: float, K: float, T: float, cost: float, 
             vol[label + "_theo"] = theo
             vol[label + "_rich_pct"] = (put_ask / theo - 1) * 100 if theo > 0 else None
     vol.update(iv_rank=vstats.get("iv_rank"), iv_pct=vstats.get("iv_pct"), leveraged=bool(vstats.get("leveraged")))
+    # فاصله‌ی سربه‌سر بر حسب انحراف‌معیار حرکت تا سررسید (نوسان تاریخی، وگرنه ضمنی وزنی)
+    be_sigma = be_sigma_src = None
+    if be:
+        for key in ("hv", "wiv"):
+            if vol.get(key):
+                be_sigma, be_sigma_src = math.log(be / S) / (vol[key] * math.sqrt(T)), key
+                break
     return {
         "stock": sc, "put": pc, "iv": iv, **greeks, **vol,
         "premium_vs_intrinsic": put_ask - intrinsic,      # منفی = پوت زیر ارزش ذاتی (ارزون)
         "breakeven": be, "breakeven_chg_pct": (be / S - 1) * 100 if be else None,
+        "be_sigma": be_sigma, "be_sigma_src": be_sigma_src,
         "scenarios": scenarios, "rate": cfg.rate, "fees": fees,
         "limit_by": "put" if put_ask_vol_lt_stock(it, base) else "stock",
     }
@@ -363,11 +377,13 @@ def scan(data: Iterable[dict], today: date, cfg: ScanConfig = ScanConfig(),
         if worst > 0 and margin >= cfg.min_locked_margin_pct and margin * 365 / max(days, 1) >= min_annual:
             tier = "locked"
         elif cfg.max_loss_pct > 0 and -margin <= cfg.max_loss_pct:   # شامل worst>0 که زیر آستانه‌ی 🟢 مونده (بیمه‌ی بدون هزینه)
+            if worst < 0 and days < cfg.min_days_loss:
+                continue
             tier = "cheap_stop"
         else:
             continue
 
-        out.append(Opportunity(
+        opp = Opportunity(
             tier=tier, put_symbol=it["namad"], underlying=base["namad"], strike=po.strike,
             expiry=po.expiry, days=days, stock_ask=stock_ask, put_ask=put_ask,
             cost_per_share=cost, worst_per_share=worst, margin_pct=margin,
@@ -379,6 +395,10 @@ def scan(data: Iterable[dict], today: date, cfg: ScanConfig = ScanConfig(),
             intrinsic=max(po.strike - stock_ask, 0.0), moneyness_pct=(po.strike / stock_ask - 1) * 100,
             ctx=_build_ctx(base, it, stock_ask, po.strike, days / 365.0, cost, worst, put_ask, cfg,
                            by_name.get(norm(base["namad"])), fees),
-        ))
+        )
+        z = opp.ctx.get("be_sigma")
+        if worst < 0 and cfg.max_breakeven_sigma > 0 and z is not None and z > cfg.max_breakeven_sigma:
+            continue    # سربه‌سر دور از دسترس: عملاً ضرر قطعی بدون شانس سود معنی‌دار
+        out.append(opp)
     out.sort(key=lambda o: (o.tier != "locked", -o.margin_pct))
     return out
