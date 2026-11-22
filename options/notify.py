@@ -199,6 +199,7 @@ def format_opportunity_classic(o: Opportunity) -> str:
 # جابه‌جا می‌شن)؛ نمودار نداریم (جدول)؛ حجم معاملات نداریم (فقط ارزش معاملات؛ «حجم سرخط فروش» حجم صفه نه معاملات)؛
 # «بدون معامله» یعنی ارزش معامله = ۰ (نه قیمت ۱ ریال)؛ درصدها کنار عددشون داخل پرانتز.
 RICH_LIMIT = 30000       # سقف تلگرام ۳۲۷۶۸ کاراکتره؛ با حاشیه
+CARD_H = "h3"            # سطح عنوان خط‌های کارت اول (۱ بزرگ‌ترین … ۶ کوچک‌ترین)
 
 
 def _e(x) -> str:
@@ -235,6 +236,7 @@ def _table(rows, header=None) -> str:
 
 
 def _details(title: str, body: str) -> str:
+    """بلوک تاشو (پیش‌فرض بسته)."""
     return f"<details><summary>{title}</summary>{body}</details>"
 
 
@@ -250,8 +252,24 @@ def _price(x: float, traded: bool) -> str:
     return n(x) if traded and x else "—"
 
 
-def _turnover_txt(x: dict, unit_fn, unit: str) -> str:
-    return f"{unit_fn(x['turnover'])} {unit}" if x["turnover"] > 0 else "بدون معامله (ارزش معامله: ۰)"
+def _money(rial: float) -> str:
+    """ریال → تومان با واحد خودکار: از ۱ میلیارد تومان به بالا «میلیارد» (۲ رقم اعشار)، وگرنه «میلیون»."""
+    t = rial / 10
+    if t >= 1e9:
+        return f"{fa(f'{t / 1e9:,.2f}')} میلیارد تومان"
+    return f"{toman_m(rial)} میلیون تومان"
+
+
+def _signed_b(rial: float) -> str:
+    """ریال → میلیارد تومان با علامت (+ ورود، - خروج)."""
+    v = rial / 1e10
+    if round(v, 1) == 0:
+        v = 0.0
+    return fa(f"{v:+,.1f}" if v else "0.0") + " میلیارد تومان"
+
+
+def _turnover_txt(x: dict) -> str:
+    return _money(x["turnover"]) if x["turnover"] > 0 else "بدون معامله (ارزش معامله: ۰)"
 
 
 def _chg_txt(chg: float) -> str:
@@ -273,7 +291,7 @@ def _valuation(c: dict):
         return None
     return ("پوت از هر دو قیمت تئوریک ارزون‌تره ✅ (قیمت مناسب خرید)" if max(rich) < 0 else
             "پوت از هر دو قیمت تئوریک گرون‌تره ❌" if min(rich) > 0 else
-            "قیمت پوت بین دو قیمت تئوریکه؛ منصفانه")
+            "قیمت پوت بین دو قیمت تئوریک (WIV و HV) ـه؛ منصفانه")
 
 
 def _pnl_rows(o: Opportunity) -> list:
@@ -306,47 +324,42 @@ def format_opportunity_rich(o: Opportunity) -> str:
     c, s, p, fe = o.ctx, o.ctx["stock"], o.ctx["put"], o.ctx["fees"]
     kind = s["kind"]
     ann = fa(f"{o.annual_pct:.0f}")
-    if o.tier == "locked":
-        head = "🟢 پروتکتیو پوت | سود تضمینی بعد از کارمزد"
-        verdict = (f"حتی اگه {kind} صفر بشه، با اعمال پوت <b>{pct(o.margin_pct)}</b> سود می‌مونه (سالانه ≈ {ann}٪)")
-    elif o.worst_per_share > 0:
-        head = "🟡 پروتکتیو پوت | حدضرر ارزان"
-        verdict = (f"بدترین حالت هم <b>{pct(o.margin_pct)}</b> سود می‌مونه (سالانه ≈ {ann}٪، کمتر از آستانه‌ی «ناب»)؛ "
-                   f"یعنی بیمه‌ی بدون هزینه و سود {kind} بالا بازه")
-    else:
-        head = "🟡 پروتکتیو پوت | حدضرر ارزان"
-        verdict = f"بیشترین ضرر ممکن تا سررسید: <b>{pct(-o.margin_pct)}</b> و سود {kind} بالا بازه"
+    head = ("🟢 پروتکتیو پوت | سود تضمینی بعد از کارمزد" if o.tier == "locked"
+            else "🟡 پروتکتیو پوت | حدضرر ارزان")
 
-    # ── کارت اول (رنگ سبز/زرد فقط با ایموجی دایره‌ی عنوان؛ تلگرام برای بلوک‌ها رنگ پس‌زمینه نداره)
-    card = (f"<blockquote><b>{head}</b><br>"
-            f"<b>{kind}:</b> {_tag(o.underlying)}<br>آخرین قیمت: {_last_txt(s)}<br>"
-            f"<b>اختیار فروش:</b> {_tag(o.put_symbol)}<br>آخرین قیمت: {_last_txt(p)}</blockquote>")
-    parts = [card, f"<p>{verdict}</p>"]
+    # ── کارت اول: همه‌ی خط‌ها عنوان (h3) = پررنگ و بزرگ‌تر از متن عادی (تلگرام اندازه‌ی فونت دلخواه نداره؛ فقط سطح عنوان)
+    # رنگ سبز/زرد فقط با ایموجی دایره‌ی عنوان؛ برای بلوک‌ها رنگ پس‌زمینه نداره
+    card = (f"<blockquote><{CARD_H}>{head}</{CARD_H}>"
+            f"<{CARD_H}>دارایی پایه: {_tag(o.underlying)}</{CARD_H}>"
+            f"<{CARD_H}>آخرین قیمت: {_last_txt(s)}</{CARD_H}>"
+            f"<{CARD_H}>نماد اختیار: {_tag(o.put_symbol)}</{CARD_H}>"
+            f"<{CARD_H}>آخرین قیمت: {_last_txt(p)}</{CARD_H}></blockquote>")
+    parts = [card]
 
     # ── خلاصه و اطلاعات مهم
     summary = [
+        ("سررسید", f"{_e(fa(gregorian_to_jalali(o.expiry)))} ({fa(o.days)} روز)"),
+        (f"قیمت اعمال (فاصله تا قیمت فعلی {kind})", f"{n(o.strike)} ({pct(o.moneyness_pct, 1, True)})"),
         (f"قیمت سرخط فروش {kind}", n(o.stock_ask)),
         ("قیمت سرخط فروش پوت", n(o.put_ask)),
-        ("قیمت اعمال", f"{n(o.strike)} ({pct(o.moneyness_pct, 1, True)} نسبت به {kind})"),
-        ("سررسید", f"{_e(fa(gregorian_to_jalali(o.expiry)))} ({fa(o.days)} روز)"),
-        ("سرمایه‌ی لازم (هر سهم، با کارمزد)", f"<b>{n(o.cost_per_share)}</b> ریال"),
-        ("بدترین حالت", f"<b>{n(o.worst_per_share)}</b> ریال ({pct(o.margin_pct, 2, True)})"),
-        ("سالانه‌شده", f"{ann}٪"),
-        (f"خالص بعد از هزینه‌ی فرصت (نرخ {rate_txt(c['rate'])}٪)", f"<b>{pct(o.net_after_carry_pct, 2, True)}</b>"),
+        ("سرمایه‌ی لازم (هر سهم)", f"<b>{n(o.cost_per_share)}</b> ریال"),
+        ("بدترین حالت (سود یا زیان)", f"<b>{n(o.worst_per_share)}</b> ریال ({pct(o.margin_pct, 2, True)})"),
+        ("بازده سالانه‌شده", f"{ann}٪"),
+        ("بازده خالص بعد از هزینه‌ی فرصت", f"<b>{pct(o.net_after_carry_pct, 2, True)}</b>"),
         ("سربه‌سر", f"{n(c['breakeven'])} ({pct(c['breakeven_chg_pct'], 1, True)})") if c["breakeven"] else None,
-        ("ظرفیت اجرا", f"{fa(o.contracts)} قرارداد ≈ {toman_m(o.position_value)} میلیون تومان"),
-        ("ارزش معامله‌ی امروز پوت", _turnover_txt(p, toman_m, "میلیون تومان")),
+        ("ظرفیت اجرا", f"{fa(o.contracts)} قرارداد ≈ {_money(o.position_value)}"),
+        ("ارزش معامله‌ی امروز پوت", _turnover_txt(p)),
         ("قیمت پوت نسبت به قیمت تئوریک", _valuation(c)) if _valuation(c) else None,
     ]
-    parts += ["<h4>📋 خلاصه و اطلاعات مهم</h4>", _table(summary), "<p>همه‌ی محاسبات با احتساب کارمزدهاست.</p>"]
+    parts += ["<h4>📋 خلاصه استراتژی</h4>", _table(summary), "<p>همه‌ی محاسبات با احتساب کارمزدهاست.</p>"]
 
     # ── قرارداد
     under = "" if c["premium_vs_intrinsic"] >= 0 else " (زیر ارزش ذاتی ✅)"
-    parts += ["<h4>📌 قرارداد</h4>", _table([
+    parts += [_details("📌 قرارداد", _table([
         ("قیمت اعمال", f"{n(o.strike)} ({pct(o.moneyness_pct, 1, True)} نسبت به {kind})"),
         ("ارزش ذاتی پوت", n(o.intrinsic)),
         ("ارزش زمانی پوت (قیمت منهای ارزش ذاتی)", n(c["premium_vs_intrinsic"]) + under),
-    ])]
+    ]))]
 
     # ── محاسبه (مبلغ کارمزدها جدا، بعد جمع‌بندی)
     calc = [
@@ -365,33 +378,31 @@ def format_opportunity_rich(o: Opportunity) -> str:
     if c["breakeven"]:
         calc.append(("سربه‌سر (فروش بازاری)", f"{n(c['breakeven'])} ({pct(c['breakeven_chg_pct'], 1, True)})"))
         calc.append(("کارمزد فروش بازاری در سربه‌سر", _fee(c["breakeven"], fe["sell"])))
-    parts += ["<h4>💰 محاسبه (هر سهم، ریال)</h4>", _table(calc), "<p>همه‌ی محاسبات با احتساب کارمزدهاست.</p>"]
+    parts.append(_details("💰 محاسبه (هر سهم، ریال)", _table(calc) + "<p>همه‌ی محاسبات با احتساب کارمزدهاست.</p>"))
 
     # ── سود و زیان در سررسید (به‌جای نمودار)
     flat = max(v for _, v in c["scenarios"]) - min(v for _, v in c["scenarios"]) < 0.05
-    parts += [
-        "<h4>📊 سود و زیان در سررسید</h4>",
-        _table(_pnl_rows(o), header=("موقعیت", f"قیمت {kind} در سررسید (تغییر نسبت به قیمت خرید)", "سود/زیان خالص")),
-    ]
+    pnl = _table(_pnl_rows(o), header=("موقعیت", f"قیمت {kind} در سررسید (تغییر نسبت به قیمت خرید)", "سود/زیان خالص"))
     if flat:
-        parts.append(f"<p>زیر قیمت اعمال ({n(o.strike)}) نتیجه همیشه {pct(c['scenarios'][0][1], 2, True)} ثابته (اعمال پوت)"
-                     + (f"؛ فقط اگه {kind} بالاتر از {n(c['breakeven'])} بره سود می‌کنی." if c["breakeven"] else ".") + "</p>")
+        pnl += (f"<p>زیر قیمت اعمال ({n(o.strike)}) نتیجه همیشه {pct(c['scenarios'][0][1], 2, True)} ثابته (اعمال پوت)"
+                + (f"؛ فقط اگه {kind} بالاتر از {n(c['breakeven'])} بره سود می‌کنی." if c["breakeven"] else ".") + "</p>")
+    parts.append(_details("📊 سود و زیان در سررسید", pnl))
 
     # ── ظرفیت
     lim = "پوت" if c["limit_by"] == "put" else kind
-    cap = [("ظرفیت اجرا", f"{fa(o.contracts)} قرارداد ({n(o.contracts * 1000)} سهم) ≈ {toman_m(o.position_value)} میلیون تومان"),
+    cap = [("ظرفیت اجرا", f"{fa(o.contracts)} قرارداد ({n(o.contracts * 1000)} سهم) ≈ {_money(o.position_value)}"),
            ("حجم سرخط فروش پوت", f"{n(p['ask_vol'])} قرارداد" if p["ask_vol_known"] else "تو این منبع نیست؛ قبل از خرید تو کارگزاری چک کن"),
            (f"حجم سرخط فروش {kind}", f"{n(s['ask_vol'])} سهم ({n(s['ask_vol'] // 1000)} قرارداد)"),
            ("محدودکننده", f"حجم سرخط فروش {lim}")]
-    parts += ["<h4>📦 ظرفیت اجرا</h4>", _table(cap)]
+    parts.append(_details("📦 ظرفیت اجرا", _table(cap)))
 
     # ── جریان پول: فقط ورود پول حقیقی، سرانه‌ها و قدرت خرید
     if s.get("has_flow"):
-        fl = [("ورود پول حقیقی (خالص)", f"{toman_b(s['real_net_value'])} میلیارد تومان ({'ورود' if s['real_net_value'] >= 0 else 'خروج'})"),
+        fl = [("ورود / خروج پول حقیقی (+ ورود، − خروج)", _signed_b(s["real_net_value"])),
               ("سرانه‌ی خرید حقیقی", f"{toman_m(s['per_capita_buy'])} میلیون تومان") if s.get("per_capita_buy") is not None else None,
               ("سرانه‌ی فروش حقیقی", f"{toman_m(s['per_capita_sell'])} میلیون تومان") if s.get("per_capita_sell") is not None else None,
               ("قدرت خرید حقیقی", fa(f"{s['buy_power']:.2f}")) if s.get("buy_power") is not None else None]
-        parts += ["<h4>💵 جریان پول حقیقی</h4>", _table(fl)]
+        parts.append(_details("💵 جریان پول حقیقی", _table(fl)))
 
     # ── جزئیات پوت (بسته)
     ptraded = p["turnover"] > 0
@@ -402,7 +413,7 @@ def format_opportunity_rich(o: Opportunity) -> str:
            ("قیمت پایانی", _last_txt(p, "final")),
            ("قیمت دیروز", n(p["yesterday"])),
            ("موقعیت باز", f"{n(p['open_interest'])} قرارداد") if p.get("open_interest") else None,
-           ("ارزش معامله‌ی امروز", _turnover_txt(p, toman_m, "میلیون تومان") + (f"، {n(p['trades'])} نوبت" if p["trades"] else ""))]
+           ("ارزش معامله‌ی امروز", _turnover_txt(p))]
     if c.get("iv"):
         put.append(("نوسان ضمنی پوت", pct(c["iv"] * 100, 0)))
     if c.get("wiv") or c.get("hv"):
@@ -436,7 +447,7 @@ def format_opportunity_rich(o: Opportunity) -> str:
           ("قیمت پایانی", _last_txt(s, "final")),
           ("کمترین قیمت امروز", n(s["low"]) if straded else "—"),
           ("بیشترین قیمت امروز", n(s["high"]) if straded else "—"),
-          ("ارزش معاملات امروز", _turnover_txt(s, toman_b, "میلیارد تومان"))]
+          ("ارزش معاملات امروز", _turnover_txt(s))]
     if s.get("nav"):
         st.append((f"ارزش خالص دارایی {_lat('NAV')}{(' ' + fa(s['nav_date'][:10])) if s['nav_date'] else ''}", n(s["nav"])))
         st.append(("قیمت سرخط فروش نسبت به ارزش خالص",
@@ -445,10 +456,10 @@ def format_opportunity_rich(o: Opportunity) -> str:
     parts.append(_details(f"📈 جزئیات {kind} {_e(o.underlying)}", _table(st)))
 
     # ── نکات
-    parts += ["<h4>⚠️ نکات</h4>", "<ul>" + "".join(f"<li>{_e(t)}</li>" for t in _notes(o)) + "</ul>"]
+    parts.append(_details("⚠️ نکات", "<ul>" + "".join(f"<li>{_e(t)}</li>" for t in _notes(o)) + "</ul>"))
 
     text = "".join(parts)
-    if len(text) > RICH_LIMIT:   # عملاً پیش نمیاد؛ ولی اگه شد، فقط بخش‌های بسته رو برمی‌داریم
+    if len(text) > RICH_LIMIT:   # عملاً پیش نمیاد (~۵ هزار کاراکتر)؛ ولی اگه شد فقط کارت و خلاصه می‌مونه
         text = re.sub(r"<details>.*?</details>", "", text, flags=re.S)
     return text
 
