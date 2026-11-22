@@ -1,11 +1,17 @@
 # -*- coding: utf-8 -*-
 """
 منبع داده‌ی tradersarena:
-  • /data/option-watch-csv           → همه‌ی آپشن‌ها در یک درخواست (قیمت‌ها، OI، ...)؛ بدون حجم صف bid/ask
-  • /data/industries/{slug}/snapshot → صف سفارش (levels) سهم‌ها و صندوق‌های پایه (همان endpointی که بورس‌ترکر می‌خونه)
-بلک-شولز/هستون/یونانی‌های خود سایت استفاده نمی‌شن؛ همه‌چیز با نرخ بهره‌ی config.json خودمون حساب می‌شه.
+  • /data/option-watch-csv  → همه‌ی آپشن‌ها در یک درخواست (قیمت‌ها، OI، شناسه‌ی هر قرارداد)
+  • /data/{insCode}/info    → صف ۵ سطحی با حجم، زمان به‌روزرسانی، جریان پول، حد مجاز قیمت (سهم/صندوق/آپشن)
+راه‌های جایگزین (وقتی info نیست):
+  • سهم/صندوق بدون id یا بدون info  → snapshot صنایع/صندوق‌ها (همان endpoint بورس‌ترکر)
+  • پوتی که info‌اش نیومد              → قیمت‌های option-watch (حجم صف نامعلوم)
+  • دیتای بدون زمان                     → وضعیت بازار optionbaaz برای تشخیص تعطیلی
+بلک-شولز/هستون/یونانی‌های خود سایت استفاده نمی‌شن؛ همه‌چیز با نرخ بهره‌ی config.py خودمون حساب می‌شه.
 """
 import dataclasses
+import json
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -14,13 +20,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from .errors import DataError, response_diag
-from .protective_put import CONTRACT_SIZE, ScanConfig, jalali_to_gregorian, norm, parse_option_name, scan
+from .protective_put import CONTRACT_SIZE, ScanConfig, jalali_to_gregorian, norm, scan
 
 DEFAULT_BASE_URL = "https://tradersarena.ir"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/131.0.0.0 Safari/537.36")
-SNAPSHOT_TIMEFRAME = 12
 MAX_WORKERS = 8
+SNAPSHOT_TIMEFRAME = 12
 MARKET_STATE_URL = "https://api.optionbaaz.ir/market/status/overview"
 
 # ترتیب دقیق ستون‌های option-watch-csv (۴۶ ستون؛ تأییدشده با ردیف نمونه)
@@ -54,9 +60,20 @@ def is_put(kind) -> bool:
 
 
 # ───────────────────────── HTTP ─────────────────────────
+def extra_headers() -> dict:
+    """هدر اضافه‌ی اختیاری برای tradersarena از env OPTIONS_API_HEADERS (JSON)، مثلاً اگه روزی کوکی/توکن لازم شد."""
+    raw = os.getenv("OPTIONS_API_HEADERS") or ""
+    try:
+        d = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        raise DataError("OPTIONS_API_HEADERS باید JSON معتبر باشه")
+    return d if isinstance(d, dict) else {}
+
+
 def http_get_json(url: str, params: Optional[dict] = None, headers: Optional[dict] = None,
                   timeout: float = 25, retries: int = 2, label: str = "") -> Any:
     h = {"User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "fa-IR,fa;q=0.9,en-US;q=0.8"}
+    h.update(extra_headers())
     h.update(headers or {})
     name = label or url
     last: Optional[DataError] = None
@@ -221,24 +238,7 @@ def chain_from_records(recs: List[dict]) -> List[dict]:
     return out
 
 
-def chain_from_items(items: List[dict]) -> List[dict]:
-    """همان زنجیره از آیتم‌های قالب full.json (منبع optionbaaz)."""
-    out = []
-    for it in items:
-        if it.get("type") != "OPTION":
-            continue
-        po = parse_option_name(it.get("name", ""))
-        q = (it.get("queue") or [{}])[0] or {}
-        if not po:
-            continue
-        out.append({"base": norm(po.underlying), "kind": po.kind, "strike": po.strike, "expiry": po.expiry,
-                    "bid": _num(q.get("buy")) or 0, "ask": _num(q.get("sell")) or 0,
-                    "last": _num(it.get("closePrice")) or 0, "volume": _num(it.get("volume")) or 0,
-                    "size": _num(it.get("contractSize")) or CONTRACT_SIZE})
-    return out
-
-
-# ───────────────────────── snapshot سهم/صندوق ─────────────────────────
+# ───────────────────────── snapshot سهم/صندوق (راه جایگزین) ─────────────────────────
 INDUSTRY_CODES = ["01", "10", "11", "13", "14", "17", "19", "20", "21", "22", "23", "25", "27", "28", "29", "31", "32",
                   "34", "38", "39", "40", "42", "43", "44", "47", "49", "53", "54", "55", "56", "57", "58", "60", "64",
                   "66", "67", "70", "72", "73", "74"]
@@ -333,6 +333,36 @@ def fetch_snapshots(base_url: str, slugs: List[str], timeframe: int = SNAPSHOT_T
     return items
 
 
+# ───────────────────────── وضعیت بازار optionbaaz (برای دیتای بدون زمان) ─────────────────────────
+STATE_CHILD_KEYS = ("TSE_STOCK", "IFB_STOCK", "TSE_ETF", "IFB_ETF")
+
+
+def parse_market_state(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict) or payload.get("status") != "success":
+        return None
+    data = payload.get("data")
+    groups = data.get("groups") if isinstance(data, dict) else None
+    if not isinstance(groups, list):
+        return None
+    found: Dict[str, bool] = {}
+    for g in groups:
+        for c in (g.get("children") or []) if isinstance(g, dict) else []:
+            if isinstance(c, dict) and c.get("key") in STATE_CHILD_KEYS and isinstance(c.get("isOpen"), bool):
+                found[c["key"]] = c["isOpen"]
+    if any(found.values()):
+        return "open"
+    if len(found) == len(STATE_CHILD_KEYS):
+        return "closed"
+    return None
+
+
+def fetch_market_state() -> Optional[str]:
+    try:
+        return parse_market_state(http_get_json(MARKET_STATE_URL, timeout=4, retries=0, label="market-state"))
+    except DataError:
+        return None
+
+
 # ───────────────────────── /data/{insCode}/info : صف ۵ سطحی کامل + زمان + جریان پول ─────────────────────────
 TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
@@ -355,8 +385,9 @@ def info_timestamp(info: dict) -> Optional[str]:
 
 
 def tradable(info: dict) -> bool:
+    """state = وضعیت معامله‌ی نماد تو بورس (A = مجاز). محافظه‌کارانه: فقط A یا نبودن فیلد؛ بقیه‌ی کدها رد می‌شن و تو لاگ میان."""
     st = str(info.get("state") or "")
-    return not st or st.startswith("A")      # A, AG, AS, ... مجازن؛ I* (ممنوع/متوقف) نه
+    return not st or st == "A"
 
 
 def info_item(info: dict, namad: str, name: str, typ: str) -> Optional[dict]:
@@ -438,12 +469,13 @@ def _proxy_candidate(r: dict, cfg: ScanConfig) -> bool:
     return margin >= floor
 
 
-def fetch_tradersarena(base_url: Optional[str] = None, stats: Optional[dict] = None,
-                       cfg: Optional[ScanConfig] = None, today: Optional[date] = None) -> Tuple[List[dict], List[dict]]:
+def fetch_tradersarena(base_url: Optional[str], stats: Optional[dict], cfg: ScanConfig,
+                       today: Optional[date] = None) -> Tuple[List[dict], List[dict]]:
     """
     → (آیتم‌های قالب full.json برای scan، زنجیره‌ی کامل برای هستون).
     ۱) option-watch-csv  ۲) info پایه‌های کاندید (صف ۵ سطحی)  ۳) info پوت‌های فرصت (حجم صف پوت + زمان)
-    پایه‌ای که کد بورسی‌اش (id) تو underlying-symbols نیست با snapshot صنایع/صندوق‌ها (روش قبلی) گرفته می‌شه.
+    جایگزین‌ها: پایه بدون id/info ← snapshot صنایع/صندوق‌ها؛ پوت بدون info ← قیمت option-watch با حجم نامعلوم.
+    نمادی که state غیر A داشته باشه (ممنوع/متوقف) جایگزین نداره و رد می‌شه.
     """
     base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
     today = today or date.today()
@@ -453,95 +485,78 @@ def fetch_tradersarena(base_url: Optional[str] = None, stats: Optional[dict] = N
     puts = [r for r in recs if is_put(r.get("kind")) and (r.get("ask") or 0) > 0]
     if not puts:
         raise DataError("هیچ پوتی با قیمت عرضه تو option-watch-csv نبود")
-    cands = [r for r in puts if cfg is None or _proxy_candidate(r, cfg)]
-    bases = sorted({r["base"] for r in cands})
+    bases = sorted({r["base"] for r in puts if _proxy_candidate(r, cfg)})
 
     meta_all = (stats or {}).get("by_name", {})
     aliases = (stats or {}).get("aliases", {})
-    via_info: Dict[str, Tuple[str, dict]] = {}        # base → (insCode, meta)
-    via_snapshot: List[str] = []
+    codes: Dict[str, Tuple[str, dict]] = {}
+    via_snapshot: List[str] = []                      # پایه‌هایی که با info نمی‌شه گرفت → snapshot
     for b in bases:
         key = norm(b)
         meta = meta_all.get(aliases.get(key, key)) or {}
         if meta.get("ins_code"):
-            via_info[b] = (str(meta["ins_code"]), meta)
+            codes[b] = (str(meta["ins_code"]), meta)
         else:
             via_snapshot.append(b)
+    if via_snapshot:
+        print(f"ℹ️ id بورسی این پایه‌ها تو underlying-symbols نیست؛ با snapshot گرفته می‌شن: {via_snapshot}")
 
+    infos = fetch_infos(base_url, sorted({c for c, _ in codes.values()}))
     stock_items: List[dict] = []
-    infos = fetch_infos(base_url, sorted({c for c, _ in via_info.values()}))
-    for b, (code, meta) in via_info.items():
+    skipped: Dict[str, str] = {}
+    for b, (code, meta) in codes.items():
         info = infos.get(code)
         if info is None:
-            via_snapshot.append(b)                      # info ناموفق → روش snapshot
+            print(f"ℹ️ info {b} نیومد؛ با snapshot گرفته می‌شه")
+            via_snapshot.append(b)
             continue
-        it = info_item(info, meta.get("namad") or b, meta.get("namad") or b, meta_to_type(meta))
-        if it is not None:
+        name = meta.get("namad") or b
+        it = info_item(info, name, name, meta_to_type(meta))
+        if it is None:
+            skipped[name] = str(info.get("state"))        # ممنوع/متوقف: جایگزین نداره، رد می‌شه
+        else:
             stock_items.append(it)
+    if skipped:
+        print(f"⚠️ پایه‌های رد‌شده به‌خاطر state غیر A (نماد: state): {skipped}")
     if via_snapshot:
         stock_items += fetch_snapshots(base_url, pick_slugs(via_snapshot, stats))
 
     have = {norm(i["namad"]) for i in stock_items}
-    missing = [b for b in bases if norm(b) not in have and aliases.get(norm(b)) not in have]
+    missing = [b for b in bases if norm(b) not in have and aliases.get(norm(b)) not in have and b not in skipped
+               and (meta_all.get(aliases.get(norm(b), norm(b))) or {}).get("namad") not in skipped]
     if missing:
-        print(f"⚠️ پایه‌هایی که صف‌شون نیومد (پوت‌هاشون رد می‌شن): {missing}")
+        print(f"⚠️ صف این پایه‌ها از هیچ راهی نیومد (پوت‌هاشون رد می‌شن): {missing}")
     if bases and len(missing) > len(bases) / 2:
-        raise DataError(f"بیشتر پایه‌ها صف نداشتن ({len(missing)} از {len(bases)}): نام نمادها یا id فرق دارن؟")
+        raise DataError(f"صف بیشتر پایه‌ها دریافت نشد ({len(missing)} از {len(bases)}): نام نمادها یا id فرق دارن؟")
+    if not stock_items:
+        raise DataError("صف هیچ پایه‌ای دریافت نشد")
 
-    items = stock_items + option_items(recs)
-
-    # مرحله‌ی ۳: برای پوت‌های فرصت، صف ۵ سطحی با حجم و زمان
-    if cfg is not None:
-        loose = dataclasses.replace(
-            cfg, min_position_value=0, min_contracts=0,
-            max_loss_pct=cfg.max_loss_pct + 2.0 if cfg.max_loss_pct > 0 else 0.0,
-            min_locked_margin_pct=cfg.min_locked_margin_pct - 0.5)
-        syms = [o.put_symbol for o in scan(items, today, loose, stats)][:MAX_PUT_INFO]
-        ids = {r["symbol"]: str(r["id"]) for r in recs if r.get("id")}
-        p_infos = fetch_infos(base_url, [ids[s] for s in syms if s in ids])
-        by_sym = {it["namad"]: it for it in items if it["type"] == "OPTION"}
-        drop = set()
-        for sym in syms:
-            info = p_infos.get(ids.get(sym))
-            old = by_sym.get(sym)
-            if info is None or old is None:
-                continue
-            new = info_item(info, sym, old["name"], "OPTION")
-            if new is None:
-                drop.add(sym)                            # ممنوع/متوقف
-                continue
-            new["openInterest"], new["contractSize"] = old["openInterest"], old["contractSize"]
-            old.clear()
-            old.update(new)
-        items = [i for i in items if not (i["type"] == "OPTION" and i["namad"] in drop)]
-    return items, chain_from_records(recs)
-
-
-# ───────────────────────── وضعیت بازار (best-effort) ─────────────────────────
-STATE_CHILD_KEYS = ("TSE_STOCK", "IFB_STOCK", "TSE_ETF", "IFB_ETF")
-
-
-def parse_market_state(payload: Any) -> Optional[str]:
-    if not isinstance(payload, dict) or payload.get("status") != "success":
-        return None
-    data = payload.get("data")
-    groups = data.get("groups") if isinstance(data, dict) else None
-    if not isinstance(groups, list):
-        return None
-    found: Dict[str, bool] = {}
-    for g in groups:
-        for c in (g.get("children") or []) if isinstance(g, dict) else []:
-            if isinstance(c, dict) and c.get("key") in STATE_CHILD_KEYS and isinstance(c.get("isOpen"), bool):
-                found[c["key"]] = c["isOpen"]
-    if any(found.values()):
-        return "open"
-    if len(found) == len(STATE_CHILD_KEYS):
-        return "closed"
-    return None
-
-
-def fetch_market_state() -> Optional[str]:
-    try:
-        return parse_market_state(http_get_json(MARKET_STATE_URL, timeout=4, retries=0, label="market-state"))
-    except DataError:
-        return None
+    # مرحله‌ی ۳: فقط پوت‌های فرصت (اسکن شل) ← info با حجم صف و زمان
+    all_items = stock_items + option_items(recs)
+    loose = dataclasses.replace(
+        cfg, min_position_value=0, min_contracts=0,
+        max_loss_pct=cfg.max_loss_pct + 2.0 if cfg.max_loss_pct > 0 else 0.0,
+        min_locked_margin_pct=cfg.min_locked_margin_pct - 0.5)
+    syms = [o.put_symbol for o in scan(all_items, today, loose, stats)][:MAX_PUT_INFO]
+    ids = {r["symbol"]: str(r["id"]) for r in recs if r.get("id")}
+    p_infos = fetch_infos(base_url, [ids[s] for s in syms if s in ids])
+    csv_puts = {it["namad"]: it for it in all_items if it["type"] == "OPTION"}
+    put_items: List[dict] = []
+    p_skipped: Dict[str, str] = {}
+    for sym in syms:
+        info, old = p_infos.get(ids.get(sym)), csv_puts.get(sym)
+        if old is None:
+            continue
+        if info is None:
+            print(f"ℹ️ info پوت {sym} نیومد؛ از قیمت‌های option-watch (حجم صف نامعلوم)")
+            put_items.append(old)
+            continue
+        new = info_item(info, sym, old["name"], "OPTION")
+        if new is None:
+            p_skipped[sym] = str(info.get("state"))
+            continue
+        new["openInterest"], new["contractSize"] = old["openInterest"], old["contractSize"]
+        put_items.append(new)
+    if p_skipped:
+        print(f"⚠️ پوت‌های رد‌شده به‌خاطر state غیر A: {p_skipped}")
+    return stock_items + put_items, chain_from_records(recs)
