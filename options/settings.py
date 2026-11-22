@@ -28,7 +28,7 @@ class Settings:
 
 ALLOWED = {
     "RATE_PERCENT", "MIN_LOCKED_MARGIN_PCT", "MIN_LOCKED_ANNUAL_PCT", "MAX_LOSS_PCT", "MIN_POSITION_VALUE_TOMAN",
-    "MIN_CONTRACTS", "MIN_DAYS", "MAX_DAYS", "MIN_OPTION_PRICE", "FEES_PERCENT", "ALERT_COOLDOWN_HOURS",
+    "MIN_CONTRACTS", "MIN_DAYS", "MIN_DAYS_LOSS", "MAX_DAYS", "MAX_BREAKEVEN_SIGMA", "MIN_OPTION_PRICE", "FEES_PERCENT", "ALERT_COOLDOWN_HOURS",
     "ALERT_IMPROVE_PP", "MAX_ALERTS_PER_RUN", "MARKET_START", "MARKET_END", "MAX_STALE_MINUTES", "HESTON_ENABLED",
 }
 FEE_KEYS = {"stock_buy", "sell", "exercise", "option"}
@@ -92,9 +92,11 @@ def load_settings(path: Optional[str] = None) -> Settings:
         s.max_loss_pct = _num("MAX_LOSS_PCT", mod.MAX_LOSS_PCT)
     if "MIN_POSITION_VALUE_TOMAN" in names:
         s.min_position_value = _num("MIN_POSITION_VALUE_TOMAN", mod.MIN_POSITION_VALUE_TOMAN) * 10   # تومان → ریال
-    for n, attr in (("MIN_CONTRACTS", "min_contracts"), ("MIN_DAYS", "min_days"), ("MAX_DAYS", "max_days")):
+    for n, attr in (("MIN_CONTRACTS", "min_contracts"), ("MIN_DAYS", "min_days"), ("MIN_DAYS_LOSS", "min_days_loss"), ("MAX_DAYS", "max_days")):
         if n in names:
             setattr(s, attr, int(_num(n, g(n))))
+    if "MAX_BREAKEVEN_SIGMA" in names:
+        s.max_breakeven_sigma = _num("MAX_BREAKEVEN_SIGMA", mod.MAX_BREAKEVEN_SIGMA)
     if "MIN_OPTION_PRICE" in names:
         s.min_option_price = _num("MIN_OPTION_PRICE", mod.MIN_OPTION_PRICE)
     if "FEES_PERCENT" in names:
