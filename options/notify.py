@@ -66,7 +66,7 @@ def _notes(o: Opportunity) -> list:
     if c.get("hv") and c.get("iv") and c["iv"] > 2.5 * c["hv"] and o.days > 3:
         out.append("نوسان ضمنی پوت چند برابر نوسان تاریخیه؛ برای پوت عمیقاً ITM معنی‌دار نیست ولی برای پوت‌های دیگه یعنی گرونه.")
     out.append("اروپایی: فقط در سررسید اعمال می‌شه و تا اون موقع پول بسته می‌مونه.")
-    out.append("ترتیب خرید: اول پوت (کم‌عمق‌تره)، بعد سهم. کارمزدها تخمینی‌ان؛ با کارگزاری‌ات چک کن.")
+    out.append("ترتیب خرید: اول پوت (کم‌عمق‌تره)، بعد سهم.")
     return out
 
 
@@ -199,7 +199,7 @@ def format_opportunity_classic(o: Opportunity) -> str:
 # جابه‌جا می‌شن)؛ نمودار نداریم (جدول)؛ حجم معاملات نداریم (فقط ارزش معاملات؛ «حجم سرخط فروش» حجم صفه نه معاملات)؛
 # «بدون معامله» یعنی ارزش معامله = ۰ (نه قیمت ۱ ریال)؛ درصدها کنار عددشون داخل پرانتز.
 RICH_LIMIT = 30000       # سقف تلگرام ۳۲۷۶۸ کاراکتره؛ با حاشیه
-CARD_H = "h3"            # سطح عنوان خط‌های کارت اول (۱ بزرگ‌ترین … ۶ کوچک‌ترین)
+CARD_H = "h4"            # سطح عنوان خط‌های کارت اول (۱ بزرگ‌ترین … ۶ کوچک‌ترین)
 
 
 def _e(x) -> str:
@@ -285,6 +285,12 @@ def _last_txt(x: dict, key: str = "last") -> str:
     return n(x[key])
 
 
+def _worst_row(o: Opportunity) -> tuple:
+    """بدترین حالت تا سررسید: اگه ضرره «حداکثر ضرر» با علامت منفی، اگه سوده «حداقل سود» با علامت مثبت."""
+    label = "حداکثر ضرر" if o.worst_per_share < 0 else "حداقل سود"
+    return (label, f"<b>{n(o.worst_per_share)}</b> ریال ({pct(o.margin_pct, 2, True)})")
+
+
 def _valuation(c: dict):
     rich = [c[k] for k in ("wiv_rich_pct", "hv_rich_pct") if c.get(k) is not None]
     if len(rich) != 2:
@@ -323,9 +329,7 @@ def format_opportunity_rich(o: Opportunity) -> str:
     """HTML برای sendRichMessage؛ اول کارت، بعد جدول خلاصه، بعد جدول‌ها؛ جزئیات ثانویه تو بلوک قابل‌بازشدن‌ان."""
     c, s, p, fe = o.ctx, o.ctx["stock"], o.ctx["put"], o.ctx["fees"]
     kind = s["kind"]
-    ann = fa(f"{o.annual_pct:.0f}")
-    head = ("🟢 پروتکتیو پوت | سود تضمینی بعد از کارمزد" if o.tier == "locked"
-            else "🟡 پروتکتیو پوت | حدضرر ارزان")
+    head = "🟢 پروتکتیو پوت" if o.tier == "locked" else "🟡 پروتکتیو پوت"
 
     # ── کارت اول: همه‌ی خط‌ها عنوان (h3) = پررنگ و بزرگ‌تر از متن عادی (تلگرام اندازه‌ی فونت دلخواه نداره؛ فقط سطح عنوان)
     # رنگ سبز/زرد فقط با ایموجی دایره‌ی عنوان؛ برای بلوک‌ها رنگ پس‌زمینه نداره
@@ -335,6 +339,9 @@ def format_opportunity_rich(o: Opportunity) -> str:
             f"<{CARD_H}>نماد اختیار: {_tag(o.put_symbol)}</{CARD_H}>"
             f"<{CARD_H}>آخرین قیمت: {_last_txt(p)}</{CARD_H}></blockquote>")
     parts = [card]
+    if c.get("data_time"):   # زمان به‌روزرسانی داده (وقت تهران)؛ قیمت‌های پیام مال همین لحظه‌ان
+        dt = c["data_time"]
+        parts.append(f"<p>🕒 زمان داده: {fa(f'{gregorian_to_jalali(dt.date())} {dt:%H:%M:%S}')} (وقت تهران)</p>")
 
     # ── خلاصه و اطلاعات مهم
     summary = [
@@ -343,12 +350,12 @@ def format_opportunity_rich(o: Opportunity) -> str:
         (f"قیمت سرخط فروش {kind}", n(o.stock_ask)),
         ("قیمت سرخط فروش پوت", n(o.put_ask)),
         ("سرمایه‌ی لازم (هر سهم)", f"<b>{n(o.cost_per_share)}</b> ریال"),
-        ("بدترین حالت (سود یا زیان)", f"<b>{n(o.worst_per_share)}</b> ریال ({pct(o.margin_pct, 2, True)})"),
-        ("بازده سالانه‌شده", f"{ann}٪"),
+        _worst_row(o),
+        ("بازده سالانه‌شده (سود یا زیان)", pct(o.annual_pct, 0, True)),
         ("بازده خالص بعد از هزینه‌ی فرصت", f"<b>{pct(o.net_after_carry_pct, 2, True)}</b>"),
         ("سربه‌سر", f"{n(c['breakeven'])} ({pct(c['breakeven_chg_pct'], 1, True)})") if c["breakeven"] else None,
         ("ظرفیت اجرا", f"{fa(o.contracts)} قرارداد ≈ {_money(o.position_value)}"),
-        ("ارزش معامله‌ی امروز پوت", _turnover_txt(p)),
+        ("ارزش معامله اختیار فروش", _turnover_txt(p)),
         ("قیمت پوت نسبت به قیمت تئوریک", _valuation(c)) if _valuation(c) else None,
     ]
     parts += ["<h4>📋 خلاصه استراتژی</h4>", _table(summary), "<p>همه‌ی محاسبات با احتساب کارمزدهاست.</p>"]
@@ -371,13 +378,17 @@ def format_opportunity_rich(o: Opportunity) -> str:
         ("قیمت اعمال", n(o.strike)),
         ("کارمزد اعمال", _fee(o.strike, fe["exercise"])),
         ("دریافتی اعمال", n(o.cost_per_share + o.worst_per_share)),
-        ("بدترین حالت", f"<b>{n(o.worst_per_share)}</b> ({pct(o.margin_pct, 2, True)})"),
+        _worst_row(o),
         (f"هزینه‌ی فرصت پول (نرخ {rate_txt(c['rate'])}٪)", pct(o.carry_pct, 1)),
         ("خالص بعد از هزینه‌ی فرصت", f"<b>{pct(o.net_after_carry_pct, 2, True)}</b>"),
     ]
     if c["breakeven"]:
         calc.append(("سربه‌سر (فروش بازاری)", f"{n(c['breakeven'])} ({pct(c['breakeven_chg_pct'], 1, True)})"))
         calc.append(("کارمزد فروش بازاری در سربه‌سر", _fee(c["breakeven"], fe["sell"])))
+        if c.get("be_sigma") is not None:
+            src = "نوسان تاریخی" if c["be_sigma_src"] == "hv" else "نوسان ضمنی وزنی"
+            z_txt = fa(f"{c['be_sigma']:.1f}")
+            calc.append((f"فاصله‌ی سربه‌سر (برحسب {src} تا سررسید)", f"{z_txt} برابر"))
     parts.append(_details("💰 محاسبه (هر سهم، ریال)", _table(calc) + "<p>همه‌ی محاسبات با احتساب کارمزدهاست.</p>"))
 
     # ── سود و زیان در سررسید (به‌جای نمودار)
