@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "normal = اجرای عادی | ping = فقط پیام تست به کانال | force = اسکن بدون چک ساعت بازار (پیام واقعی می‌فرسته)"
+        description: "normal = اجرای عادی | ping = فقط پیام تست | probe = فقط نمایش ساختار/دسترسی tradersarena تو لاگ | force = اسکن بدون چک ساعت بازار (پیام واقعی می‌فرسته)"
         type: choice
-        options: [normal, ping, force]
+        options: [normal, ping, probe, force]
         default: normal
   repository_dispatch:
     types: [run-options]
@@ -47,10 +47,10 @@ jobs:
           restore-keys: opt-state-
 
       - name: Scan protective puts
-        run: python option_main.py ${{ github.event.inputs.mode == 'ping' && '--ping' || github.event.inputs.mode == 'force' && '--force' || '' }}
+        run: python option_main.py ${{ github.event.inputs.mode == 'ping' && '--ping' || github.event.inputs.mode == 'probe' && '--probe' || github.event.inputs.mode == 'force' && '--force' || '' }}
         env:
-          OPTIONS_API_URL: ${{ secrets.OPTIONS_API_URL }}          # اختیاری؛ پیش‌فرض داخل کد
-          OPTIONS_API_HEADERS: ${{ secrets.OPTIONS_API_HEADERS }}  # اختیاری
+          TRADERSARENA_BASE_URL: ${{ secrets.TRADERSARENA_BASE_URL }}   # اختیاری؛ پیش‌فرض https://tradersarena.ir
+          OPTIONS_API_HEADERS: ${{ secrets.OPTIONS_API_HEADERS }}       # اختیاری (JSON هدر/کوکی، اگه روزی لازم شد)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPTIONS_CHAT_ID: ${{ secrets.OPTIONS_CHAT_ID }}
           GIST_ID: ${{ secrets.GIST_ID }}
