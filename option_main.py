@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from options.errors import DataError
 from options.market_stats import IV_URL, HV_URL, load_stats
-from options.notify import format_opportunity, send
+from options.notify import format_opportunity, send, send_opportunity
 from options.probe import probe
 from options.protective_put import norm, scan
 from options.settings import ConfigError, load_settings
@@ -171,7 +171,7 @@ def main() -> int:
             print("─" * 40 + "\n" + text)
             if not a.dry_run:
                 print("⚠️ TELEGRAM_BOT_TOKEN/OPTIONS_CHAT_ID تنظیم نیست")
-        elif not send(token, chat, text):
+        elif not send_opportunity(token, chat, o):
             continue
         state.mark(key, o.margin_pct)
         sent += 1
