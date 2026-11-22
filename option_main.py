@@ -122,6 +122,7 @@ def main() -> int:
     cfg = settings.scan
 
     now = datetime.now(TEHRAN)
+    print(f"🕒 زمان اجرا (وقت تهران): {now:%Y-%m-%d %H:%M:%S}" + (" | حالت force" if a.force else ""))
     if not (a.force or market_is_open(now, settings.market_start, settings.market_end)):
         print("⏸️ بازار بسته است")
         return 0
@@ -162,7 +163,9 @@ def main() -> int:
         if sent >= settings.max_alerts:
             break
         key = f"{o.put_symbol}:{o.tier}"
-        if not state.should_alert(key, o.margin_pct, settings.cooldown_hours, settings.improve_pp):
+        # force = تست دستی: ضدتکرار (cooldown) رد می‌شه تا پیام دیده بشه؛ و حالتش ذخیره نمی‌شه که هشدار واقعی بعدی نخوابه
+        if not a.force and not state.should_alert(key, o.margin_pct, settings.cooldown_hours, settings.improve_pp):
+            print(f"⏭️ {o.put_symbol} ({o.tier}): تکراری؛ تو بازه‌ی ضدتکرار قبلاً هشدار رفته")
             continue
         if settings.heston_enabled and chain:
             attach_heston(o, chain, cfg.rate, today, hcache, aliases_rev)
@@ -172,9 +175,14 @@ def main() -> int:
             if not a.dry_run:
                 print("⚠️ TELEGRAM_BOT_TOKEN/OPTIONS_CHAT_ID تنظیم نیست")
         elif not send_opportunity(token, chat, o):
+            print(f"❌ ارسال {o.put_symbol} ناموفق بود")
             continue
-        state.mark(key, o.margin_pct)
+        else:
+            print(f"📨 ارسال شد: {o.put_symbol} ({o.tier}، {o.margin_pct:+.2f}%)")
+        if not a.force:
+            state.mark(key, o.margin_pct)
         sent += 1
+    print(f"📬 {sent} پیام ارسال شد از {len(opps)} فرصت")
     if not a.dry_run and state.dirty:
         state.save()
     return 0
