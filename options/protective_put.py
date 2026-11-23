@@ -31,17 +31,20 @@ CONTRACT_SIZE = 1000  # هر قرارداد = ۱۰۰۰ سهم
 
 
 # ───────────────────────── جدول کارمزد (کسر از ۱؛ ۰٫۲۳۲ درصد = 0.00232) ─────────────────────────
-# منبع: جدول کارمزد کاربر (خرید و فروش جدا). اعمال سهام مالیات داره (۰٫۵۵٪) ولی اعمال ETF نه (۰٫۰۵٪).
+# سهام: با معامله‌ی واقعی تأیید شده (فملی بورس، فزر فرابورس: ۰.۳۶۳۲٪ خرید). صندوق‌های سهامی/اهرمی: خرید ۰.۲۲۴۵٪ و فروش ۰.۲۳٪
+# با ۳ صندوق (اهرم، موج، اطلس) کالیبره شده؛ جدول قبلی ۰.۲۳۲٪/۰.۲۳۷۵٪ بود. کارمزد واقعی سامانه = بالا‌گرد(ارزش × نرخ).
+# منبع قبلی: جدول کارمزد کاربر (خرید و فروش جدا). اعمال سهام مالیات داره (۰٫۵۵٪) ولی اعمال ETF نه (۰٫۰۵٪).
 BUY_FEE = {
-    "stock": 0.003712, "equity_etf": 0.00232, "fixed_etf": 0.000375, "leveraged_etf": 0.00232,
-    "mixed_etf": 0.001215, "sectoral_etf": 0.00232, "commodity_etf": 0.0012, "gold_etf": 0.0012,
+    "stock": 0.003712, "equity_etf": 0.002245, "fixed_etf": 0.000375, "leveraged_etf": 0.002245,
+    "mixed_etf": 0.001215, "sectoral_etf": 0.002245, "commodity_etf": 0.0012, "gold_etf": 0.0012,
     "silver_etf": 0.0012, "certificate": 0.0024,
 }
 SELL_FEE = {
-    "stock": 0.0088, "equity_etf": 0.002375, "fixed_etf": 0.000375, "leveraged_etf": 0.002375,
-    "mixed_etf": 0.0013225, "sectoral_etf": 0.002375, "commodity_etf": 0.0012, "gold_etf": 0.0012,
+    "stock": 0.0088, "equity_etf": 0.0023, "fixed_etf": 0.000375, "leveraged_etf": 0.0023,
+    "mixed_etf": 0.0013225, "sectoral_etf": 0.0023, "commodity_etf": 0.0012, "gold_etf": 0.0012,
     "silver_etf": 0.0012, "certificate": 0.0024,
 }
+BUY_FEE_FARABOURS_STOCK = 0.003632   # خرید سهم فرابورسی (فروش مثل بورس ۰.۸۸٪)؛ با معامله‌ی واقعی فزر و دزاگرس تأیید شده
 OPTION_FEE = 0.00103         # خرید/فروش اختیار
 EXERCISE_FEE_STOCK = 0.0055  # اعمال با پایه‌ی سهم (شامل مالیات نقل‌وانتقال)
 EXERCISE_FEE_ETF = 0.0005    # اعمال با پایه‌ی ETF
@@ -61,18 +64,27 @@ def fee_class(asset_type: str) -> str:
     return "leveraged_etf" if t.startswith("ETF") else "stock"   # ناشناخته: محافظه‌کارانه
 
 
-def asset_fees(asset_type: str, cfg: "ScanConfig") -> dict:
+def asset_fees(asset_type: str, cfg: "ScanConfig", namad: Optional[str] = None) -> dict:
     """buy/sell/exercise برای پایه. مقدار override در cfg (غیر از -1) جدول رو کنار می‌زنه."""
     key = fee_class(asset_type)
     sell, buy = SELL_FEE[key], BUY_FEE[key]
+    if key == "stock" and namad and norm(namad) in {norm(x) for x in cfg.farabourse_symbols}:
+        buy = BUY_FEE_FARABOURS_STOCK
     exercise = EXERCISE_FEE_ETF if key.endswith("_etf") else EXERCISE_FEE_STOCK
-    return {
+    fees = {
         "class": key,
         "buy": cfg.stock_buy_fee if cfg.stock_buy_fee >= 0 else buy,
         "sell": cfg.sell_fee if cfg.sell_fee >= 0 else sell,
         "exercise": cfg.exercise_fee if cfg.exercise_fee >= 0 else exercise,
         "option": cfg.option_buy_fee,
     }
+    # override نماد به نماد (مثلاً سهم فرابورسی): از همه‌ی ردیف‌های بالا قوی‌تره
+    ov = {norm(k): v for k, v in cfg.fee_overrides.items()}.get(norm(namad)) if namad else None
+    if ov:
+        for src, dst in (("stock_buy", "buy"), ("sell", "sell"), ("exercise", "exercise"), ("option", "option")):
+            if src in ov:
+                fees[dst] = ov[src]
+    return fees
 
 # ───────────────────────── تنظیمات (همه قابل override با env در option_main.py) ─────────────────────────
 @dataclass
@@ -82,6 +94,8 @@ class ScanConfig:
     sell_fee: float = -1.0          # فروش بازاری پایه (وقتی قیمت بالای strike رفته)
     exercise_fee: float = -1.0      # اعمال پوت (فروش پایه به قیمت strike)
     option_buy_fee: float = OPTION_FEE
+    farabourse_symbols: tuple = ()   # سهم‌های فرابورسی (کارمزد خرید ۰.۳۶۳۲٪)
+    fee_overrides: dict = field(default_factory=dict)   # {نماد پایه: {stock_buy|sell|exercise|option: کسر از ۱}}
 
     # آستانه‌ی «سود تضمینی»: حاشیه‌ی خالص بعد از کارمزد (درصد از سرمایه)
     min_locked_margin_pct: float = 0.5
@@ -284,7 +298,7 @@ def _build_ctx(base: dict, it: dict, S: float, K: float, T: float, cost: float, 
     iv = put_iv(put_ask, S, K, T, cfg.rate)
     greeks = put_greeks(S, K, T, cfg.rate, iv) if iv else {}
     intrinsic = max(K - S, 0.0)
-    fees = fees or asset_fees(base.get("type"), cfg)
+    fees = fees or asset_fees(base.get("type"), cfg, base.get("namad"))
     # اگه سهم بالای strike بره بازاری می‌فروشیم (کارمزد فروش)، وگرنه اعمال می‌کنیم
     def payoff(st_price):
         return max(st_price * (1 - fees["sell"]), K * (1 - fees["exercise"]))
@@ -364,7 +378,7 @@ def scan(data: Iterable[dict], today: date, cfg: ScanConfig = ScanConfig(),
         if contracts < cfg.min_contracts:
             continue
 
-        fees = asset_fees(base.get("type"), cfg)
+        fees = asset_fees(base.get("type"), cfg, base.get("namad"))
         min_annual = cfg.rate * 100 if cfg.min_locked_annual_pct < 0 else cfg.min_locked_annual_pct
         cost = stock_ask * (1 + fees["buy"]) + put_ask * (1 + fees["option"])
         proceeds = po.strike * (1 - fees["exercise"])
