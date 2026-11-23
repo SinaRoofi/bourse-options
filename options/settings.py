@@ -28,7 +28,7 @@ class Settings:
 
 ALLOWED = {
     "RATE_PERCENT", "MIN_LOCKED_MARGIN_PCT", "MIN_LOCKED_ANNUAL_PCT", "MAX_LOSS_PCT", "MIN_POSITION_VALUE_TOMAN",
-    "MIN_CONTRACTS", "MIN_DAYS", "MIN_DAYS_LOSS", "MAX_DAYS", "MAX_BREAKEVEN_SIGMA", "MIN_OPTION_PRICE", "FEES_PERCENT", "ALERT_COOLDOWN_HOURS",
+    "MIN_CONTRACTS", "MIN_DAYS", "MIN_DAYS_LOSS", "MAX_DAYS", "MAX_BREAKEVEN_SIGMA", "MIN_OPTION_PRICE", "FEES_PERCENT", "FEE_OVERRIDES", "FARABOURS_SYMBOLS", "ALERT_COOLDOWN_HOURS",
     "ALERT_IMPROVE_PP", "MAX_ALERTS_PER_RUN", "MARKET_START", "MARKET_END", "MAX_STALE_MINUTES", "HESTON_ENABLED",
 }
 FEE_KEYS = {"stock_buy", "sell", "exercise", "option"}
@@ -112,6 +112,22 @@ def load_settings(path: Optional[str] = None) -> Settings:
                 setattr(s, attr, v if v < 0 else v / 100)
         if "option" in fees:
             s.option_buy_fee = _num("FEES_PERCENT.option", fees["option"]) / 100
+    if "FARABOURS_SYMBOLS" in names:
+        syms = mod.FARABOURS_SYMBOLS
+        if not isinstance(syms, (list, tuple, set)) or not all(isinstance(x, str) for x in syms):
+            raise ConfigError("FARABOURS_SYMBOLS باید یک لیست از نمادها (رشته) باشه")
+        s.farabourse_symbols = tuple(syms)
+    if "FEE_OVERRIDES" in names:
+        ov = mod.FEE_OVERRIDES
+        if not isinstance(ov, dict):
+            raise ConfigError("FEE_OVERRIDES باید یک دیکشنری {نماد: {...}} باشه")
+        for sym, d in ov.items():
+            if not isinstance(d, dict):
+                raise ConfigError(f"FEE_OVERRIDES[{sym!r}] باید یک دیکشنری باشه")
+            bad = sorted(set(d) - FEE_KEYS)
+            if bad:
+                raise ConfigError(f"کلید ناشناخته تو FEE_OVERRIDES[{sym!r}]: {bad}. کلیدهای مجاز: {sorted(FEE_KEYS)}")
+            s.fee_overrides[str(sym)] = {k: _num(f"FEE_OVERRIDES.{sym}.{k}", v) / 100 for k, v in d.items()}
     if "ALERT_COOLDOWN_HOURS" in names:
         st.cooldown_hours = _num("ALERT_COOLDOWN_HOURS", mod.ALERT_COOLDOWN_HOURS)
     if "ALERT_IMPROVE_PP" in names:
