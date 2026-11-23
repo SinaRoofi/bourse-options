@@ -363,7 +363,7 @@ def format_opportunity_rich(o: Opportunity) -> str:
     # ── قرارداد
     under = "" if c["premium_vs_intrinsic"] >= 0 else " (زیر ارزش ذاتی ✅)"
     parts += [_details("📌 قرارداد", _table([
-        ("قیمت اعمال", f"{n(o.strike)} ({pct(o.moneyness_pct, 1, True)} نسبت به {kind})"),
+        (f"قیمت اعمال (فاصله تا قیمت فعلی {kind})", f"{n(o.strike)} ({pct(o.moneyness_pct, 1, True)})"),
         ("ارزش ذاتی پوت", n(o.intrinsic)),
         ("ارزش زمانی پوت (قیمت منهای ارزش ذاتی)", n(c["premium_vs_intrinsic"]) + under),
     ]))]
@@ -413,7 +413,7 @@ def format_opportunity_rich(o: Opportunity) -> str:
               ("سرانه‌ی خرید حقیقی", f"{toman_m(s['per_capita_buy'])} میلیون تومان") if s.get("per_capita_buy") is not None else None,
               ("سرانه‌ی فروش حقیقی", f"{toman_m(s['per_capita_sell'])} میلیون تومان") if s.get("per_capita_sell") is not None else None,
               ("قدرت خرید حقیقی", fa(f"{s['buy_power']:.2f}")) if s.get("buy_power") is not None else None]
-        parts.append(_details("💵 جریان پول حقیقی", _table(fl)))
+        parts.append(_details(f"💵 جریان پول حقیقی {kind} {_e(o.underlying)}", _table(fl)))
 
     # ── جزئیات پوت (بسته)
     ptraded = p["turnover"] > 0
