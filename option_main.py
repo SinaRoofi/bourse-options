@@ -66,6 +66,7 @@ def snapshot_age_minutes(data: list, now: datetime):
 
 def notify_ops(key: str, text: str, token: str, chat: str, dry_run: bool, cooldown_h: float = 6) -> None:
     """پیام مشکل عملیاتی (دسترسی/دیتا) به کانال؛ حداکثر هر cooldown_h ساعت یک بار برای هر key."""
+    chat = ERRORS_CHAT_ID  # پیام عملیاتی/خطا هرگز به کانال هشدار (OPTIONS_CHAT_ID) نمی‌ره
     state = AlertState(os.getenv("GIST_ID", ""), os.getenv("GIST_TOKEN", ""))
     state.load()
     if not state.should_alert(key, 0.0, cooldown_h, 1e9):
@@ -79,16 +80,23 @@ def notify_ops(key: str, text: str, token: str, chat: str, dry_run: bool, cooldo
         state.save()
 
 
+ERRORS_CHAT_ID = os.getenv("ERRORS_CHAT_ID", "")   # فقط خطاها؛ هشدارهای معاملاتی جدا و روی OPTIONS_CHAT_ID می‌رن
+
+
 def report_data_error(e: DataError, token: str, chat: str, dry_run: bool) -> None:
+    chat = ERRORS_CHAT_ID  # نادیده گرفتن کانال هشدار
+    repo = os.getenv("GITHUB_REPOSITORY", "bourse-options")
+    head = f"⚠️ خطا | ریپو: {repo}"
     if e.status in (401, 403):
         print(AUTH_HINT)
-        text = (f"⚠️ اسکنر آپشن: دسترسی به tradersarena رد شد (HTTP {e.status}). تا رفع این مشکل هشداری ارسال نمی‌شه. "
-                "این پیام حداکثر هر ۶ ساعت تکرار می‌شه.")
+        text = (f"{head}\nعلت: دسترسی به tradersarena رد شد (HTTP {e.status})؛ "
+                "احتمالاً IP گیت‌هاب بلاک شده یا ورود لازم است.\n"
+                "تا رفع مشکل هشداری ارسال نمی‌شود (تکرار پیام: حداکثر هر ۶ ساعت).")
         notify_ops("_auth_error", text, token, chat, dry_run)
     else:
         reason = " ".join(str(e).split())[:150]
-        text = (f"⚠️ اسکنر آپشن: دریافت دیتا ناموفق بود ({reason}). تا برگشتن دیتا هشداری ارسال نمی‌شه؛ "
-                "این پیام حداکثر هر ۳ ساعت تکرار می‌شه.")
+        text = (f"{head}\nعلت: دریافت دیتا ناموفق بود ← {reason}\n"
+                "تا برگشتن دیتا هشداری ارسال نمی‌شود (تکرار پیام: حداکثر هر ۳ ساعت).")
         notify_ops("_data_error", text, token, chat, dry_run, cooldown_h=3)
 
 
