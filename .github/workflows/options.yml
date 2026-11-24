@@ -57,5 +57,6 @@ jobs:
           OPTIONS_API_HEADERS: ${{ secrets.OPTIONS_API_HEADERS }}       # اختیاری (JSON هدر/کوکی، اگه روزی لازم شد)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPTIONS_CHAT_ID: ${{ secrets.OPTIONS_CHAT_ID }}
+          ERRORS_CHAT_ID: ${{ secrets.ERRORS_CHAT_ID }}   # کانال خطاها (جدا از هشدارها)
           GIST_ID: ${{ secrets.GIST_ID }}
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
